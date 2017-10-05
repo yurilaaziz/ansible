@@ -19,7 +19,7 @@
 # along with Ansible. If not, see <http://www.gnu.org/licenses/>.
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
@@ -27,11 +27,10 @@ ANSIBLE_METADATA = {'metadata_version': '1.0',
 DOCUMENTATION = '''
 ---
 module: zabbix_proxy
-short_description: Zabbix  proxys creates/deletes
+short_description: Zabbix proxy configuration on Zabbix server
 description:
-   - Create host proxys if they do not exist.
-   - Delete existing host proxys if they exist.
-version_added: "2.4"
+   - This module allows you to create, and delete Zabbix proxy configuration entries on Zabbix servers.
+version_added: "2.5"
 author:
     - "Amine Ben Asker (@asker_amine)"
 requirements:
@@ -57,13 +56,11 @@ options:
             - Basic Auth login
         required: false
         default: None
-        version_added: "2.1"
     http_login_password:
         description:
             - Basic Auth password
         required: false
         default: None
-        version_added: "2.1"
     state:
         description:
             - Create or delete proxy.
@@ -72,7 +69,7 @@ options:
         choices: [ "present", "absent" ]
     timeout:
         description:
-            - The timeout of API request(seconds).
+            - The timeout of API request (seconds).
         default: 10
     proxy_name:
         description:
@@ -81,22 +78,18 @@ options:
     proxy_mode:
         description:
             -  Select the proxy mode.
-        required: true
+        required: false
+        default: "active"
         choices: [ "active", "passive" ]
     proxy_hosts:
         description:
             -  List of hosts to be monitored by the proxy.
         required: false
-
-notes:
-    - Note that without encrypted communications (sensitive) proxy configuration data
-      may become available to parties having access to the Zabbix server trapper port
-      when using an active proxy.
 '''
 
 EXAMPLES = '''
-# Base create host proxys example
-- name: Create host proxys
+# Base create host proxies example
+- name: Create active Zabbix Proxy
   local_action:
     module: zabbix_proxy
     server_url: http://monitor.example.com
@@ -106,20 +99,33 @@ EXAMPLES = '''
     proxy_name: ZBXPROXY01
     proxy_mode: active
 
-    zabbix_proxy:
-      server_url: http://10.30.71.87/zabbix
-      login_user: Admin
-      login_password: zabbix
-      state: present
-      proxy_name:
-          - ZBXPROXY01
-      proxy_mode: passive
-      proxy_interfaces:
-        - ip: 10.20.30.40
-          dns: ""
-          useip: 1
-          port: 10051
+- name: Create passive Zabbix Proxy
+  local_action:
+    module: zabbix_proxy
+    server_url: http://monitor.example.com
+    login_user: username
+    login_password: password
+    state: present
+    proxy_name: ZBXPROXY02
+    proxy_mode: passive
+    proxy_interfaces:
+      - ip: 10.20.30.40
+        dns: ""
+        useip: 1
+        port: 10051
 
+- name: Remove Zabbix proxies
+  local_action:
+    module: zabbix_proxy
+    server_url: http://monitor.example.com
+    login_user: username
+    login_password: password
+    state: absent
+    proxy_name:
+      - ZBXPROXY01
+      - ZBXPROXY02
+
+Note: currently it is not possible to change proxies from active to passive and vice versa without deleting them first.
 '''
 
 RETURN = '''
@@ -145,7 +151,7 @@ class Proxy(object):
         self._zapi = zbx
 
     # create proxy if not exists
-    def __createQuery(self, proxy_name, proxy_mode,proxy_hosts,proxy_interface):
+    def __createQuery(self, proxy_name, proxy_mode, proxy_hosts, proxy_interface):
         query = {'host': proxy_name }
 
         if proxy_mode == "active":
@@ -155,7 +161,7 @@ class Proxy(object):
             query['interface'] = proxy_interface
         return query
 
-    def create_proxy(self, proxy_names, proxy_mode, proxy_hosts,interfaces):
+    def create_proxy(self, proxy_names, proxy_mode, proxy_hosts, interfaces):
         try:
             proxy_add_list = []
             for proxy_name in proxy_names:
@@ -171,16 +177,16 @@ class Proxy(object):
             return proxy_add_list
 
         except Exception as e:
-            self._module.fail_json(msg="Failed to create proxy(ies): %s" % e)
+            self._module.fail_json(msg="Failed to create proxy/proxies: %s" % e)
 
-    # delete proxy(ies)
+    # delete proxy/proxies
     def delete_proxy(self, proxy_ids):
         try:
             if self._module.check_mode:
                 self._module.exit_json(changed=True)
             self._zapi.proxy.delete(proxy_ids)
         except Exception as e:
-            self._module.fail_json(msg="Failed to delete proxy(ies), Exception: %s" % e)
+            self._module.fail_json(msg="Failed to delete proxy/proxies, Exception: %s" % e)
 
     # get proxy ids by name
     def get_proxy_ids(self, proxy_names):
@@ -202,7 +208,7 @@ def main():
             http_login_user=dict(type='str',required=False, default=None),
             http_login_password=dict(type='str',required=False, default=None, no_log=True),
             proxy_name=dict(type='list', required=True, aliases=['proxy_names']),
-            proxy_mode=dict(required=True,  choices=['active','passive']),
+            proxy_mode=dict(required=False, choices=['active','passive'], default='active'),
             proxy_hosts=dict(type='list', required=False, default=None),
             state=dict(default="present", choices=['present','absent']),
             proxy_interfaces=dict(type='list', required=False),
@@ -226,7 +232,7 @@ def main():
     if module.params['proxy_interfaces'] is not None:
         proxy_interface = module.params['proxy_interfaces'][0]
     elif proxy_mode == "passive":
-        module.fail_json(msg="Missing requried interface for passive proxy")
+        module.fail_json(msg="Missing required interface for passive proxy")
     else:
         proxy_interface = None
     state = module.params['state']
@@ -256,14 +262,14 @@ def main():
             for proxy in proxy_list:
                 delete_proxy_names.append(proxy['name'])
             module.exit_json(changed=True,
-                             result="Successfully deleted host proxy(s): %s." % ",".join(delete_proxy_names))
+                             result="Successfully deleted host proxy/proxies: %s." % ",".join(delete_proxy_names))
         else:
-            module.exit_json(changed=False, result="No host proxy(s) to delete.")
+            module.exit_json(changed=False, result="No host proxy/proxies to delete.")
     else:
         # create host proxy_name
-        proxy_add_list = proxy.create_proxy(proxy_name, proxy_mode, proxy_hosts,proxy_interface)
+        proxy_add_list = proxy.create_proxy(proxy_name, proxy_mode, proxy_hosts, proxy_interface)
         if len(proxy_add_list) > 0:
-            module.exit_json(changed=True, result="Successfully created host proxy(s): %s" % proxy_add_list)
+            module.exit_json(changed=True, result="Successfully created host proxy/proxies: %s" % proxy_add_list)
         else:
             module.exit_json(changed=False)
 
